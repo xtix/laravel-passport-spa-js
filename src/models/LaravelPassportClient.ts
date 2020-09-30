@@ -22,6 +22,7 @@ export class LaravelPassportClient implements LaravelPassportClientOptions {
   client_id: string;
   redirect_uri: string;
   private _token?: JWT;
+  private _idToken?: JWT;
 
   private _oauthPrefix?: string;
   get oauthPrefix(): string {
@@ -73,6 +74,7 @@ export class LaravelPassportClient implements LaravelPassportClientOptions {
 
     // internal
     this._token = undefined;
+    this._idToken = undefined;
   }
 
   /**
@@ -90,6 +92,10 @@ export class LaravelPassportClient implements LaravelPassportClientOptions {
     }
 
     return this._token ? this._token.raw : null;
+  }
+
+  getIdToken(): string | null {
+    return this._idToken ? this._idToken.raw : null;
   }
 
   /**
@@ -205,6 +211,7 @@ export class LaravelPassportClient implements LaravelPassportClientOptions {
    */
   signOut(): void {
     this._token = undefined;
+    this._idToken = undefined;
   }
 
   // *** Internal
@@ -215,6 +222,10 @@ export class LaravelPassportClient implements LaravelPassportClientOptions {
    */
   private storeToken(token: JWT): void {
     this._token = token;
+  }
+
+  private storeIdToken(token: JWT): void {
+    this._idToken = token;
   }
 
   /**
@@ -333,7 +344,14 @@ export class LaravelPassportClient implements LaravelPassportClientOptions {
       const authorizationSignature = authorization.getSignature();
 
       // get the token
-      const token = await this.getTokenFromServer(authorizationSignature);
+      const tokenResponse = await this.getTokenFromServer(authorizationSignature);
+
+      // no access token given
+      if (!tokenResponse.access_token) {
+        throw new Error('Invalid token response');
+      }
+
+      const token = new JWT(tokenResponse.access_token);
 
       // validate scope
       if (authorization.scope !== token.scopesAsString()) {
@@ -342,6 +360,10 @@ export class LaravelPassportClient implements LaravelPassportClientOptions {
 
       // store token
       this.storeToken(token);
+
+      if (tokenResponse.id_token) {
+        this.storeIdToken(new JWT(tokenResponse.id_token));
+      }
 
       return true;
     } catch (e) {
@@ -356,11 +378,11 @@ export class LaravelPassportClient implements LaravelPassportClientOptions {
    * Runs an XHTTP token request to the authentication server with given authorization signature.
    * @param authorizationSignature
    */
-  private async getTokenFromServer(authorizationSignature: AuthorizationSignature): Promise<JWT> {
+  private async getTokenFromServer(authorizationSignature: AuthorizationSignature): Promise<any> {
     // prepare url
     const url = cleanUrl(`${this.domain}/${this.oauthPrefix}/token`);
 
-    const tokenResponse = await getJSON(url, {
+    return await getJSON(url, {
       method: 'POST',
       body: JSON.stringify({
         grant_type: 'authorization_code',
@@ -369,12 +391,5 @@ export class LaravelPassportClient implements LaravelPassportClientOptions {
         ...authorizationSignature,
       }),
     });
-
-    // no access token given
-    if (!tokenResponse.access_token) {
-      throw new Error('Invalid token response');
-    }
-
-    return new JWT(tokenResponse.access_token);
   }
 }
